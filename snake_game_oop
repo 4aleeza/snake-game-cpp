@@ -1,0 +1,398 @@
+#include <iostream>
+#include <conio.h>
+#include <windows.h>
+#include <ctime>
+#include <cstdlib>
+
+using namespace std;
+
+// ===================== LOW-LEVEL CONSOLE UTILS ======================
+
+void gotoxy(int x, int y)
+{
+    COORD c;
+    c.X = x;
+    c.Y = y;
+    SetConsoleCursorPosition(GetStdHandle(STD_OUTPUT_HANDLE), c);
+}
+
+void hideCursor()
+{
+    HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
+    CONSOLE_CURSOR_INFO info;
+    info.bVisible = FALSE;
+    info.dwSize = 100;
+    SetConsoleCursorInfo(out, &info);
+}
+
+void setColor(WORD color)
+{
+    SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), color);
+}
+
+struct Point {
+    int x, y;
+};
+
+// ================================================================
+//                  ABSTRACT BASE: DRAWABLE
+// ================================================================
+
+class Drawable {
+public:
+    virtual void draw() const = 0;
+    virtual ~Drawable() {}
+};
+
+// ================================================================
+//                      GAME OBJECT BASE
+// ================================================================
+
+class GameObject : public Drawable {
+protected:
+    Point position;
+
+public:
+    GameObject(int x = 0, int y = 0) { position = { x, y }; }
+
+    Point getPos() const { return position; }
+    void setPos(Point p) { position = p; }
+};
+
+// ================================================================
+//                      BOARD CLASS
+// ================================================================
+
+class Board : public Drawable {
+private:
+    int width;
+    int height;
+
+public:
+    Board(int w = 50, int h = 25) : width(w), height(h) {}
+
+    int getWidth() const { return width; }
+    int getHeight() const { return height; }
+
+    void draw() const override
+    {
+        system("cls");
+        setColor(9);
+
+        // Top and bottom borders
+        for (int x = 0; x < width; x++)
+        {
+            gotoxy(x, 1);      cout << '#';
+            gotoxy(x, height); cout << '#';
+        }
+
+        // Left and right borders
+        for (int y = 1; y <= height; y++)
+        {
+            gotoxy(0, y);         cout << '#';
+            gotoxy(width - 1, y); cout << '#';
+        }
+
+        setColor(7);
+    }
+};
+
+// ================================================================
+//                      FOOD CLASS
+// ================================================================
+
+class Food : public GameObject {
+public:
+    Food(int x = 0, int y = 0) : GameObject(x, y) {}
+
+    void draw() const override
+    {
+        setColor(12);
+        gotoxy(position.x, position.y);
+        cout << "*";
+        setColor(7);
+    }
+};
+
+// ================================================================
+//                      SCORE PANEL CLASS
+// ================================================================
+
+class ScorePanel : public Drawable {
+private:
+    int x, y;
+    int score;
+
+public:
+    ScorePanel(int xPos = 55, int yPos = 3)
+        : x(xPos), y(yPos), score(0) {}
+
+    void setScore(int s) { score = s; }
+
+    void draw() const override
+    {
+        setColor(14);
+        gotoxy(x, y);
+        cout << "Score: " << score << "   ";
+
+        gotoxy(x, y + 2);
+        cout << "Controls: WASD";
+
+        gotoxy(x, y + 3);
+        cout << "Press P to pause";
+
+        setColor(7);
+    }
+};
+
+// ================================================================
+//                      SNAKE CLASS
+// ================================================================
+
+class Snake : public Drawable {
+private:
+    Point body[1000];
+    int length;
+    char dir;  // 'U', 'D', 'L', 'R'
+
+public:
+    Snake()
+    {
+        length = 3;
+        body[0] = { 10,10 };
+        body[1] = { 9,10 };
+        body[2] = { 8,10 };
+        dir = 'R';
+    }
+
+    void changeDir(char key)
+    {
+        if (key == 'w' && dir != 'D') dir = 'U';
+        if (key == 's' && dir != 'U') dir = 'D';
+        if (key == 'a' && dir != 'R') dir = 'L';
+        if (key == 'd' && dir != 'L') dir = 'R';
+    }
+
+    Point getHead() const { return body[0]; }
+    Point getTail() const { return body[length - 1]; }
+    int getLength() const { return length; }
+
+    // Movement logic: same as your original (stable & predictable)
+    bool move(const Point& foodPos, bool& ate, int maxWidth, int maxHeight)
+    {
+        ate = false;
+
+        Point tail = body[length - 1];
+
+        // Shift body
+        for (int i = length - 1; i > 0; i--)
+            body[i] = body[i - 1];
+
+        // Move head
+        if (dir == 'U') body[0].y--;
+        if (dir == 'D') body[0].y++;
+        if (dir == 'L') body[0].x--;
+        if (dir == 'R') body[0].x++;
+
+        // Eat?
+        if (body[0].x == foodPos.x && body[0].y == foodPos.y)
+        {
+            ate = true;
+            body[length] = tail;
+            length++;
+        }
+
+        // Self collision
+        for (int i = 1; i < length; i++)
+            if (body[0].x == body[i].x && body[0].y == body[i].y)
+                return false;
+
+        // Wall collision
+        if (body[0].x <= 0 || body[0].x >= maxWidth - 1 ||
+            body[0].y <= 1 || body[0].y >= maxHeight - 1)
+            return false;
+
+        return true;
+    }
+
+    void draw() const override
+    {
+        setColor(10);
+        for (int i = 0; i < length; i++)
+        {
+            gotoxy(body[i].x, body[i].y);
+            cout << "O";
+        }
+        setColor(7);
+    }
+
+    void drawHead() const
+    {
+        setColor(10);
+        gotoxy(body[0].x, body[0].y);
+        cout << "O";
+        setColor(7);
+    }
+
+    void eraseTail(Point tail) const
+    {
+        gotoxy(tail.x, tail.y);
+        cout << " ";
+    }
+};
+
+// ================================================================
+//                      GAME CLASS
+// ================================================================
+
+class Game {
+private:
+    Board board;
+    Snake snake;
+    Food food;
+    ScorePanel scorePanel;
+    int score;
+    bool running;
+    bool paused;
+
+public:
+    Game()
+        : board(50, 25), food(5, 5), scorePanel(55, 3),
+          score(0), running(true), paused(false)
+    {
+        showStartScreen();
+        board.draw();
+        snake.draw();
+        spawnFood();
+        food.draw();
+        scorePanel.setScore(score);
+        scorePanel.draw();
+    }
+
+    void showStartScreen()
+    {
+        system("cls");
+        setColor(11);
+        gotoxy(10, 5); cout << "==== SNAKE GAME (OOP EDITION) ====";
+        gotoxy(10, 7); cout << "Use WASD to move the snake.";
+        gotoxy(10, 8); cout << "Avoid walls and yourself.";
+        gotoxy(10, 9); cout << "Eat '*' to grow and score points.";
+        gotoxy(10, 11); cout << "Press any key to start...";
+
+        setColor(7);
+        getch();
+    }
+
+    void spawnFood()
+    {
+        int x = rand() % (board.getWidth() - 2) + 1;
+        int y = rand() % (board.getHeight() - 2) + 2;
+        food.setPos({ x, y });
+        food.draw();
+    }
+
+    void processInput()
+    {
+        if (_kbhit())
+        {
+            char key = _getch();
+
+            if (key == 'p' || key == 'P')
+            {
+                paused = !paused;
+                if (paused)
+                {
+                    setColor(13);
+                    gotoxy(55, 6);
+                    cout << "Status: PAUSED   ";
+                    setColor(7);
+                }
+                else
+                {
+                    setColor(13);
+                    gotoxy(55, 6);
+                    cout << "Status: RUNNING  ";
+                    setColor(7);
+                }
+            }
+            else
+            {
+                snake.changeDir(key);
+            }
+        }
+    }
+
+    void update()
+    {
+        if (paused) return;
+
+        bool ate = false;
+        Point oldTail = snake.getTail();
+
+        bool alive = snake.move(food.getPos(), ate, board.getWidth(), board.getHeight());
+        if (!alive)
+        {
+            running = false;
+            return;
+        }
+
+        // Draw new head
+        snake.drawHead();
+
+        if (ate)
+        {
+            score++;
+            scorePanel.setScore(score);
+            scorePanel.draw();
+            spawnFood();
+        }
+        else
+        {
+            // Clear last tail
+            snake.eraseTail(oldTail);
+        }
+    }
+
+    void run()
+    {
+        // Status text
+        setColor(13);
+        gotoxy(55, 6);
+        cout << "Status: RUNNING  ";
+        setColor(7);
+
+        while (running)
+        {
+            processInput();
+            update();
+            Sleep(80); // constant speed everywhere
+        }
+
+        gameOverScreen();
+    }
+
+    void gameOverScreen()
+    {
+        gotoxy(0, board.getHeight() + 2);
+        setColor(12);
+        cout << "GAME OVER! Final score = " << score << endl;
+        setColor(7);
+        cout << "Press any key to exit...";
+        _getch();
+    }
+};
+
+// ================================================================
+//                          MAIN
+// ================================================================
+
+int main()
+{
+    hideCursor();
+    srand(static_cast<unsigned int>(time(0)));
+
+    Game game;
+    game.run();
+
+    return 0;
+}
